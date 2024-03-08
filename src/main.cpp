@@ -77,8 +77,15 @@ void loop() {
         /*-   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -  */
         // Allow next ir-signal to be received.
         IrReceiver.resume();
-
     }
+    /* NOTE
+     * Serial1.RX geht noch als pin. Falls SoftSerial RX ebenfalls das Stoppen des ir-receivers
+     * benötigt.
+     */
+    /* TODO
+     * JSONDocument empfangen {"sgm": [d,u,d,1]} //Array mit den 4 Segmentwerten
+     * Sementdisplay loop
+     */
 }
 
 /*===============================================================================================*/
