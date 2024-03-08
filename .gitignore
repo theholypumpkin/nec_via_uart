@@ -1,5 +1,3 @@
 .pio/
 .vscode/
-src/segment_display.cpp
-include/segment_display.hpp
 .gitconfig
