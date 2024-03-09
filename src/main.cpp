@@ -78,13 +78,32 @@ void loop() {
         // Allow next ir-signal to be received.
         IrReceiver.resume();
     }
-    /* NOTE
-     * Serial1.RX geht noch als pin. Falls SoftSerial RX ebenfalls das Stoppen des ir-receivers
-     * benötigt.
-     */
+
+    /*___________________________________________________________________________________________*/
+    if(SoftSerial.available()){
+        String jsonString = SoftSerial.readStringUntil('\0'); //Terminate on null terminator
+        JsonDocument doc;
+        DeserializationError err = deserializeJson(doc, jsonString);
+
+        if (err == DeserializationError::Ok){
+            // TODO deal with the JSONArray to display on 7Segment Display
+            //JsonArray arr = doc["sgm"].as<JsonArray>();
+            //NOTE Temporary for debugging
+            Serial.println(doc["sgm"].as<String>()); // converts array to string
+        }
+        else{
+            Serial.print("Error");
+            Serial.println(jsonString);
+        }
+    }
+
+    /*___________________________________________________________________________________________*/
     /* TODO
      * JSONDocument empfangen {"sgm": [d,u,d,1]} //Array mit den 4 Segmentwerten
      * Sementdisplay loop
+     * OOP State machine because despite it being infirior to switch case and more complicated
+     * SoftSerial.TX as it's own state
+     * SeriallizeJSON inot String (Class) not char pointer
      */
 }
 
