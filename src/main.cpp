@@ -34,6 +34,42 @@
 /* enums, typedef, structs, unions */
 /*===============================================================================================*/
 /* global variables */
+uint8_t seven_segment_lut[] = {
+    0b00000101, // 0
+    0b01111101, // 1
+    0b00100110, // 2
+    0b00110100, // 3
+    0b01011100, // 4
+    0b10010100, // 5
+    0b10000100, // 6
+    0b00111101, // 7
+    0b00000100, // 8
+    0b00010100, // 9
+    0b00001100, // A
+    0b11000100, // b
+    0b11100100, // c
+    0b01100100, // d
+    0b10000110, // E
+    0b10001100, // F
+    0b10000101, // G
+    0b01001100, // H
+    0b00100101, // J
+    0b11000111, // L
+    0b10101101, // m
+    0b11101100, // n
+    0b11100100, // o
+    0b00001110, // P
+    0b00011100, // q
+    0b11101110, // r
+    0b11000110, // t
+    0b11100101, // u
+    0b01010111, // w
+    0b01010100, // y
+    0b11111110, // -
+    0b01101110, // /
+    0b10001110, // (
+    0b00110100  // )
+};
 /*===============================================================================================*/
 /* global objects */
 SoftwareSerial SoftSerial(SOFTWARE_SERIAL_RX_PIN, SOFTWARE_SERIAL_TX_PIN);
@@ -48,9 +84,13 @@ void setup(void) {
     Serial.begin(115200); // USB Serial only for debugging.
 
     IrReceiver.begin(IR_RECEIVE_PIN, true); // begin the IrReceiver
-
-    SPI.begin(); //begin the SPI interface for the MCP23S17
+    /* -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   - */
+    //begin the SPI interface for the MCP23S17
+    SPI.begin(); 
     MCP.begin();
+    // init the MCP23S17
+    // set all pins as output (technically GPA0 to GPA7 are inputs, as they are the cathode)
+    MCP.pinMode16(0x0000);
 }
 /*_______________________________________________________________________________________________*/
 
@@ -61,20 +101,20 @@ void loop() {
         JsonDocument doc;
         doc["addr"] = IrReceiver.decodedIRData.address;
         doc["cmd"] = IrReceiver.decodedIRData.command;
-        /*-   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -  */
+        /* -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   - */
         /* pause the ir-receiver to allow SoftSerial to work, as the ir-receiver is using 
          * interrupts. This conflixts with the Timings of SoftSerial.
          */
         IrReceiver.stop();
-        /*-   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -  */
+        /* -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   - */
         /*send the JSON String via SoftSerial*/
         size_t jsonStringLength = serializeJson(doc, SoftSerial);
-        /*-   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -  */
+        /* -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   - */
         // delay and calculate by how much we have to compensate to restart the ir-receiver
         delayMicroseconds(IR_DELAY_US); // so we don't get double commands
         uint32_t compensateValue = IR_COMPENSATION_CONSTANT * jsonStringLength + IR_DELAY_US;
         IrReceiver.start(compensateValue); //Restart the Receiver and  compensate for stop time.
-        /*-   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -  */
+        /* -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   - */
         // Allow next ir-signal to be received.
         IrReceiver.resume();
     }
@@ -96,14 +136,23 @@ void loop() {
             Serial.println(jsonString);
         }
     }
+    /*___________________________________________________________________________________________*/
+    uint8_t arr[4] =  {1,2,3,4};
+    for (uint8_t x = 0, y = 1; x < 4; x++){
+        // upper byte controlls cathods to selegt each led, lower byte controls segments a,b,c,d
+        uint16_t mcpRegisterValue = (seven_segment_lut[arr[x]] << 8) | y;
+        y = y << 1; // next segment selct line
+        MCP.write16(mcpRegisterValue);
+        delay(1000);
 
+    }
     /*___________________________________________________________________________________________*/
     /* TODO
      * JSONDocument empfangen {"sgm": [d,u,d,1]} //Array mit den 4 Segmentwerten
      * Sementdisplay loop
      * OOP State machine because despite it being infirior to switch case and more complicated
      * SoftSerial.TX as it's own state
-     * SeriallizeJSON inot String (Class) not char pointer
+     * SeriallizeJSON into String (Class) not char pointer or directly to SoftSerial
      */
 }
 
