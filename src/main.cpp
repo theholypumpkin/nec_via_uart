@@ -143,7 +143,7 @@ void loop() {
         uint16_t mcpRegisterValue = (seven_segment_lut[arr[x]] << 8) | y;
         y = y << 1; // next segment selct line
         MCP.write16(mcpRegisterValue);
-        delay(1000);
+        delayMicroseconds(5208); // 48 fps
 
     }
     /*___________________________________________________________________________________________*/
