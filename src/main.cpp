@@ -16,7 +16,7 @@
 #include <MCP23S17.h>
 #include <IRremote.hpp>
 #include <SoftwareSerial.h> // TX pin is broken so bitbanging
-
+#include <StateMachine.h>
 #include <ArduinoJson.h> 
 /*===============================================================================================*/
 /* macros */
@@ -34,46 +34,21 @@
 /* enums, typedef, structs, unions */
 /*===============================================================================================*/
 /* global variables */
-uint8_t seven_segment_lut[] = {
-    0b00000101, // 0
-    0b01111101, // 1
-    0b00100110, // 2
-    0b00110100, // 3
-    0b01011100, // 4
-    0b10010100, // 5
-    0b10000100, // 6
-    0b00111101, // 7
-    0b00000100, // 8
-    0b00010100, // 9
-    0b00001100, // A
-    0b11000100, // b
-    0b11100100, // c
-    0b01100100, // d
-    0b10000110, // E
-    0b10001100, // F
-    0b10000101, // G
-    0b01001100, // H
-    0b00100101, // J
-    0b11000111, // L
-    0b10101101, // m
-    0b11101100, // n
-    0b11100100, // o
-    0b00001110, // P
-    0b00011100, // q
-    0b11101110, // r
-    0b11000110, // t
-    0b11100101, // u
-    0b01010111, // w
-    0b01010100, // y
-    0b11111110, // -
-    0b01101110, // /
-    0b10001110, // (
-    0b00110100  // )
-};
+String jsonToSend = "";
 /*===============================================================================================*/
 /* global objects */
 SoftwareSerial SoftSerial(SOFTWARE_SERIAL_RX_PIN, SOFTWARE_SERIAL_TX_PIN);
 MCP23S17 MCP(MCP23S17_CS_PIN);
+
+/* Why an OPP Statemachine? Because I always wanted to use the library, but ist not worth it 
+ * compared to a simple switch case. But here I have no more than 4 states and no real performace
+ * or power constrains. So why not do it the hard way.
+ */
+StateMachine machine= StateMachine();
+State *ReadNec      = machine.addState(&readNecState);
+State *ReadSerial   = machine.addState(&readSerialState);
+State *WriteSerial  = machine.addState(&writeSerialState);
+State *PrintSegment = machine.addState(&printSegmentsState);
 /*===============================================================================================*/
 /* methods */
 void setup(void) {
@@ -91,70 +66,121 @@ void setup(void) {
     // init the MCP23S17
     // set all pins as output (technically GPA0 to GPA7 are inputs, as they are the cathode)
     MCP.pinMode16(0x0000);
+    /* -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   - */
+    // transition to itself as entrypoint into the statemachine
+    PrintSegment->addTransition(&printSegmentsPrintSegmentsTransition, PrintSegment);
+    // transitions to other states
+    PrintSegment->addTransition(&printSegmentsReadNecTransition, ReadNec);
+    PrintSegment->addTransition(&printSegmentsReadSerialTransition, ReadSerial);
+    ReadNec->addTransition(&readNecWriteSerialTransition, WriteSerial);
+    WriteSerial->addTransition(&writeSerialPrintSegmentsTransition, PrintSegment);
+    ReadSerial->addTransition(&readSerialPrintSegmentsTransition, PrintSegment);
 }
 /*_______________________________________________________________________________________________*/
 
-void loop() {
-    //uint16_t address = 0, command = 0;
-    if (IrReceiver.decode()) {
-        // generate a JSON document
-        JsonDocument doc;
-        doc["addr"] = IrReceiver.decodedIRData.address;
-        doc["cmd"] = IrReceiver.decodedIRData.command;
-        /* -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   - */
-        /* pause the ir-receiver to allow SoftSerial to work, as the ir-receiver is using 
-         * interrupts. This conflixts with the Timings of SoftSerial.
-         */
-        IrReceiver.stop();
-        /* -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   - */
-        /*send the JSON String via SoftSerial*/
-        size_t jsonStringLength = serializeJson(doc, SoftSerial);
-        /* -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   - */
-        // delay and calculate by how much we have to compensate to restart the ir-receiver
-        delayMicroseconds(IR_DELAY_US); // so we don't get double commands
-        uint32_t compensateValue = IR_COMPENSATION_CONSTANT * jsonStringLength + IR_DELAY_US;
-        IrReceiver.start(compensateValue); //Restart the Receiver and  compensate for stop time.
-        /* -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   - */
-        // Allow next ir-signal to be received.
-        IrReceiver.resume();
-    }
+void loop() { machine.run(); }
 
-    /*___________________________________________________________________________________________*/
-    if(SoftSerial.available()){
-        String jsonString = SoftSerial.readStringUntil('\0'); //Terminate on null terminator
-        JsonDocument doc;
-        DeserializationError err = deserializeJson(doc, jsonString);
+/*_______________________________________________________________________________________________*/
+/* state machine states*/
 
-        if (err == DeserializationError::Ok){
-            // TODO deal with the JSONArray to display on 7Segment Display
-            //JsonArray arr = doc["sgm"].as<JsonArray>();
-            //NOTE Temporary for debugging
-            Serial.println(doc["sgm"].as<String>()); // converts array to string
-        }
-        else{
-            Serial.print("Error");
-            Serial.println(jsonString);
-        }
+/** @brief The state to read the NEC-Protocol from the IR-Receiver */
+void readNecState(void){
+    JsonDocument doc;
+    doc["addr"] = IrReceiver.decodedIRData.address;
+    doc["cmd"] = IrReceiver.decodedIRData.command;
+    /* -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   - */
+    /*Serialize Json into String*/
+    size_t jsonStringLength = serializeJson(doc, jsonToSend);
+    /* -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   - */
+    // Allow next ir-signal to be received.
+    IrReceiver.resume();
+}
+
+/*-   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -  */
+/** @brief The state to read the JSON-String on the SoftSerial interface */
+void readSerialState(void){
+    String jsonString = SoftSerial.readStringUntil('\0'); //Terminate on null terminator
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, jsonString);
+
+    if (err == DeserializationError::Ok){
+        // TODO deal with the JSONArray to display on 7Segment Display
+        //JsonArray arr = doc["sgm"].as<JsonArray>();
+        //NOTE Temporary for debugging
+        Serial.println(doc["sgm"].as<String>()); // converts array to string
     }
-    /*___________________________________________________________________________________________*/
-    uint8_t arr[4] =  {1,2,3,4};
+    else{
+        Serial.print("Error");
+        Serial.println(jsonString);
+    }
+}
+
+/*-   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -  */
+/** @brief The state to write the JSON-String to the SoftSerial interface */
+void writeSerialState(void){
+    IrReceiver.stop(); // stop the IR-Receiver, so we can Print to Serial
+    // calculate compensation 
+    uint32_t compensateValue = IR_COMPENSATION_CONSTANT * jsonStringLength;
+    SoftSerial.write(jsonToSend); // Write JSON-String to Serial
+    SoftSerial.flush(); // empty buffer
+    IrReceiver.start(compensateValue); //Restart the Receiver and compensate for stop time.
+}
+
+/*-   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -  */
+/** @brief The state to print the 4 symbols code to the segment display */
+void printSegmentsState(void){
+    
+    uint8_t arr[4] =  {1,2,3,4}; // TODO replace with global buffer
+    
     for (uint8_t x = 0, y = 1; x < 4; x++){
         // upper byte controlls cathods to selegt each led, lower byte controls segments a,b,c,d
         uint16_t mcpRegisterValue = (seven_segment_lut[arr[x]] << 8) | y;
         y = y << 1; // next segment selct line
+        /* . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . */
         MCP.write16(mcpRegisterValue);
+        /* . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . */
         delayMicroseconds(5208); // 48 fps
-
     }
-    /*___________________________________________________________________________________________*/
-    /* TODO
-     * JSONDocument empfangen {"sgm": [d,u,d,1]} //Array mit den 4 Segmentwerten
-     * Sementdisplay loop
-     * OOP State machine because despite it being infirior to switch case and more complicated
-     * SoftSerial.TX as it's own state
-     * SeriallizeJSON into String (Class) not char pointer or directly to SoftSerial
-     */
 }
+
+/*_______________________________________________________________________________________________*/
+/* state machine transitions */
+
+/** @brief Transition to itself, entrypoint for statemachine */
+bool printSegmentsPrintSegmentsTransition(void){
+    return true; // BUG this could cause a death loop, as this is the first transistion to be
+    // evaluated and it retruns true
+}
+
+/*-   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -  */
+/** @brief the transition to reading the NEC-Protocol form the IR-Receiver to writing the data to
+ * serial. Always returns true;
+ */
+bool readNecWriteSerialTransition(void){ return true; }
+
+/*-   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -  */
+/** @brief the Transition to printing the segments, to reading the IR-Receiver */
+bool printSegmentsReadNecTransition(void){
+    return IrReceiver.decode(); // return true when we can decode a new NEC-Transmission.
+}
+
+/*-   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -  */
+/** @brief the Transition to printing the segments, to reading the SoftSerial interface */
+bool printSegmentsReadSerialTransition(void){
+    return SoftSerial.available(); // return true of there is a JSON-String to read.
+}
+
+/*-   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -  */
+/** @brief the Transition to reading the SoftSerial interface , to printing the segments 
+ * Always returns true
+ */
+bool readSerialPrintSegmentsTransition(void){ return true; }
+
+/*-   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -  */
+/** @brief the Transition to printing the segments, to reading the SoftSerial interface 
+ * Always returns true
+ */
+bool writeSerialPrintSegmentsTransition(void){ return true; }
 
 /*===============================================================================================*/
 /* end of file */
