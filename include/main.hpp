@@ -21,12 +21,24 @@
 /* variables */
 /*===============================================================================================*/
 /* methods */
-/** @brief The arduino setup function */
+
+/** @brief setup for the first core handeling Serial */
 void setup(void);
 
-/*-   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -  */
-/** @brief The arduino loop function */
+/* _____________________________________________________________________________________________ */
+/** @brief main loop for the first core */
 void loop(void);
 
+/* _____________________________________________________________________________________________ */
+/** @brief setup for the second core the IR-Sending */
+void setup1(void);
+
+/* _____________________________________________________________________________________________ */
+/** @brief main loop for the second core */
+void loop1(void) ;
+
+/* _____________________________________________________________________________________________ */
+/** @brief Free-RTOS Task to launch the second core with setup1 and loop1*/
+void esploop1(void* pvParameters);
 /*===============================================================================================*/
 /* end of file */
