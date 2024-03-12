@@ -31,7 +31,7 @@
 #define DECODE_NEC
 /*===============================================================================================*/
 /* enums, typedef, structs, unions */
-typedef enum statemachine_e{
+enum statemachine_e{
     READ_SERIAL_STATE,
     READ_NEC_STATE,
     WRITE_SERIAL_STATE,
@@ -152,7 +152,7 @@ void setup(void) {
      */
     SoftSerial.begin(SOFTWARE_SERIAL_BAUD); // SoftSerial is slow
     SoftSerial.setTimeout(2); // only wait for at max 2.5 bytes before giving up to read
-    Serial.begin(115200); // USB Serial only for debugging.
+    //Serial.begin(115200); // USB Serial only for debugging.
 
     IrReceiver.begin(IR_RECEIVE_PIN, true); // begin the IrReceiver
     /* -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   - */
@@ -167,74 +167,73 @@ void setup(void) {
 
 void loop() {
     static statemachine_e e_state; // No State at init so we will go into default
-    static String jsonToSend = "", jsonToReceive = "";
+    static String jsonToSend = "";
     static uint32_t compensateValue = 0;
-    static JsonArray jsonArr;
     static uint8_t fontMapping[256];
-    //uint8_t index = 0;
-    JsonDocument jsonDoc;
-    DeserializationError err;
 
     switch(e_state){
         case READ_SERIAL_STATE:
-            jsonToReceive = SoftSerial.readStringUntil('\0'); //Terminate on null terminator
-            
-            err = deserializeJson(jsonDoc, jsonToReceive);
-            // if it is not a valid json go back to default state
-            if (err != DeserializationError::Ok){ e_state = WRITE_DISPLAY_STATE; break;}
+            {   
+                e_state = WRITE_DISPLAY_STATE; // go back to default state after this one
+                /* . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . */
+                //Terminate on null terminator
+                String jsonToReceive = SoftSerial.readStringUntil('\0');
+                JsonDocument jsonDoc;
+                DeserializationError err = deserializeJson(jsonDoc, jsonToReceive);
+                // if it is not a valid json go back to default state
+                if (err != DeserializationError::Ok) break;
             // extract array
-            jsonArr = jsonDoc["sgm"].as<JsonArray>();
-            
-            Serial.println(jsonDoc["sgm"].as<String>());
-            jsonArr.isNull() ? Serial.println("isNull") : Serial.println("Data");
-            for (JsonVariant value : jsonArr){
-                Serial.print(value.as<const char*>());
-                //fontMapping[index] = (uint8_t) value;
-                //index++; // wraps around after 256 bytes
+                /* . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . */
+                JsonArray jsonArr = jsonDoc["sgm"].as<JsonArray>();
+                uint8_t cnt = 0;
+
+                for (JsonVariant value : jsonArr){
+                    fontMapping[cnt] = (uint8_t) value.as<const char*>()[0] - 0x20;
+                    cnt++; // wraps around after 256 bytes
+                }
             }
-            jsonDoc.clear(); // empty JsonDocument
-            e_state = WRITE_DISPLAY_STATE; // go back to default state
             break;
         /* -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   - */
         case READ_NEC_STATE:
-            jsonDoc["addr"] = IrReceiver.decodedIRData.address;
-            jsonDoc["cmd"] = IrReceiver.decodedIRData.command;
-            /* . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . */
-            /*Serialize Json into String*/
-            compensateValue = serializeJson(jsonDoc, jsonToSend) * IR_COMPENSATION_CONSTANT;
-            /* . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . */
-            // Allow next ir-signal to be received.
-            IrReceiver.resume();
-            // Transition unter the curcumstance, when jsonToSend String is not an empty String.
-            // Set transitions below switch case
-            jsonDoc.clear(); // empty JsonDocument
+            {
+                JsonDocument jsonDoc;
+                jsonDoc["addr"] = IrReceiver.decodedIRData.address;
+                jsonDoc["cmd"] = IrReceiver.decodedIRData.command;
+                /* . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . */
+                /*Serialize Json into String*/
+                compensateValue = serializeJson(jsonDoc, jsonToSend) * IR_COMPENSATION_CONSTANT;
+                /* . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . */
+                // Allow next ir-signal to be received.
+                IrReceiver.resume();
+                // Transition unter the curcumstance, when jsonToSend String is not an empty String.
+                // Set transitions below switch case
+                //jsonDoc.clear(); // empty JsonDocument
+            }
             break;
         /* -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   - */
         case WRITE_SERIAL_STATE:
             IrReceiver.stop(); // stop the IR-Receiver, so we can Print to Serial
+            /* . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . */
             // calculate compensation 
             SoftSerial.print(jsonToSend); // Write JSON-String to Serial
             SoftSerial.flush(); // empty buffer
             jsonToSend = ""; // empty the string
+            /* . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . */
             delayMicroseconds(IR_DELAY_US);
             //Restart the Receiver and compensate for stop time.
             IrReceiver.start(compensateValue + IR_DELAY_US);
+            /* . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . */
             e_state = WRITE_DISPLAY_STATE; // resume default state
             break;
         /* -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   - */
         case WRITE_DISPLAY_STATE:
         default:
-            /*if (!jsonArr == NULL){
-                fontMapping[0] = 'E'; 
-                fontMapping[1] = 'r'; 
-                fontMapping[2] = 'r'; 
-                fontMapping[3] = 'o';
-            }*/
-
+            // TODO allow more then 4 character by scrolling? 
+            // Right now I can read in up to 256 characters but only ever print 4.
             for (uint8_t x = 0, y = 1; x < 4; x++){
-                // upper byte controls cathods to select each segment, lower byte controls digit
-                uint16_t mcpRegisterValue = (sevensegfonttable[fontMapping[x] - 0x20 ] << 8) | y;
-                y = y << 1; // next segment selct line
+                // upper byte controls segments (cahode), lower byte controls digit (anode)
+                uint16_t mcpRegisterValue = (sevensegfonttable[fontMapping[x]] << 8) | y;
+                y = y << 1; // next digit select shift anodle line.
                 /* . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . */
                 MCP.write16(mcpRegisterValue);
                 /* . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . */
