@@ -66,6 +66,13 @@ uint8_t sevensegfonttable[] = {
         0b00111101, // 7
         0b00000100, // 8
         0b00010100, // 9
+        0b11111111, // : (colon) all high can't be displayed
+        0b11111111, // ; (semi colon) all high can't be displayed
+        0b11111111, // < (less than) all high can't be displayed
+        0b11110110, // = (equal)
+        0b11111111, // > (greater than) all high can't be displayed
+        0b00101010, // ? (questionmark)
+        0b00100100, // @ (at-sign)
         // capitalization is ignored so the tabes repeats twice
         0b00001100, // A
         0b11000100, // B is lower case
@@ -77,12 +84,13 @@ uint8_t sevensegfonttable[] = {
         0b01001100, // H
         0b01111101, // I same as '1'
         0b00100101, // J
+        0b10001100, // K is lower case, looks funky
         0b11000111, // L
         0b10101101, // M is lower case 
         0b11101100, // N is lower case 
         0b00000101, // O same as '0'
         0b00001110, // P
-        0b00000001, // Q asame as '0' with decimal point
+        0b00000001, // Q same as '0' with decimal point
         0b11101110, // R is lower case
         0b10010100, // S same as '5'
         0b11000110, // T is lower case
@@ -102,7 +110,7 @@ uint8_t sevensegfonttable[] = {
         // capitalization is still ignored
         0b00001100, // a is upper case
         0b11000100, // b 
-        0b11100100, // c
+        0b11100110, // c
         0b01100100, // d
         0b10000110, // e is upper case
         0b10001100, // f is upper case
@@ -110,6 +118,7 @@ uint8_t sevensegfonttable[] = {
         0b11001100, // h
         0b11111101, // i
         0b11110101, // j
+        0b10001100, // k looks funky
         0b11001111, // l
         0b10101101, // m
         0b11101100, // n
@@ -142,6 +151,7 @@ void setup(void) {
      * including on of the Hardware UART pins. So here we go I bitbang it.
      */
     SoftSerial.begin(SOFTWARE_SERIAL_BAUD); // SoftSerial is slow
+    SoftSerial.setTimeout(2); // only wait for at max 2.5 bytes before giving up to read
     Serial.begin(115200); // USB Serial only for debugging.
 
     IrReceiver.begin(IR_RECEIVE_PIN, true); // begin the IrReceiver
@@ -160,20 +170,28 @@ void loop() {
     static String jsonToSend = "", jsonToReceive = "";
     static uint32_t compensateValue = 0;
     static JsonArray jsonArr;
-    static uint8_t fontMapping[4];
+    static uint8_t fontMapping[256];
+    //uint8_t index = 0;
     JsonDocument jsonDoc;
     DeserializationError err;
 
     switch(e_state){
         case READ_SERIAL_STATE:
-            
             jsonToReceive = SoftSerial.readStringUntil('\0'); //Terminate on null terminator
             
             err = deserializeJson(jsonDoc, jsonToReceive);
-
-            if (err != DeserializationError::Ok) break;
-            
+            // if it is not a valid json go back to default state
+            if (err != DeserializationError::Ok){ e_state = WRITE_DISPLAY_STATE; break;}
+            // extract array
             jsonArr = jsonDoc["sgm"].as<JsonArray>();
+            
+            Serial.println(jsonDoc["sgm"].as<String>());
+            jsonArr.isNull() ? Serial.println("isNull") : Serial.println("Data");
+            for (JsonVariant value : jsonArr){
+                Serial.print(value.as<const char*>());
+                //fontMapping[index] = (uint8_t) value;
+                //index++; // wraps around after 256 bytes
+            }
             jsonDoc.clear(); // empty JsonDocument
             e_state = WRITE_DISPLAY_STATE; // go back to default state
             break;
@@ -206,15 +224,15 @@ void loop() {
         /* -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   -   - */
         case WRITE_DISPLAY_STATE:
         default:
-            if (!jsonArr == NULL){
+            /*if (!jsonArr == NULL){
                 fontMapping[0] = 'E'; 
                 fontMapping[1] = 'r'; 
                 fontMapping[2] = 'r'; 
                 fontMapping[3] = 'o';
-            }
-        
+            }*/
+
             for (uint8_t x = 0, y = 1; x < 4; x++){
-                // upper byte controlls cathods to selegt each led, lower byte controls segments a,b,c,d
+                // upper byte controls cathods to select each segment, lower byte controls digit
                 uint16_t mcpRegisterValue = (sevensegfonttable[fontMapping[x] - 0x20 ] << 8) | y;
                 y = y << 1; // next segment selct line
                 /* . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . */
